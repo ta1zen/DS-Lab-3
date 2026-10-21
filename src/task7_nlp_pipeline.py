@@ -11,6 +11,17 @@ from src.task5_word2vec import train_word2vec
 from src.task6_Ngrams import generate_ngrams, count_ngrams
 
 
+def _validate_documents(documents: List[str]) -> None:
+    if not isinstance(documents, list):
+        raise TypeError("Documents must be a list")
+    if not documents:
+        raise ValueError("Documents cannot be empty")
+    if not all(isinstance(document, str) for document in documents):
+        raise TypeError("All documents must be strings")
+    if len(documents) < 2:
+        raise ValueError("At least 2 documents are required")
+
+
 def analyze_documents(
     documents: List[str],
     use_lemmatization: bool = True,
@@ -48,37 +59,73 @@ def analyze_documents(
         9
     """
     # Input validation
-    ...
+    _validate_documents(documents)
+    if vector_method not in ("bow", "tfidf"):
+        raise ValueError("vector_method must be 'bow' or 'tfidf'")
+    if (not isinstance(ngram_range, tuple) or len(ngram_range) != 2
+            or not all(isinstance(n, int) for n in ngram_range)
+            or ngram_range[0] < 1 or ngram_range[0] > ngram_range[1]):
+        raise ValueError(f"Invalid ngram_range: {ngram_range}")
 
     # Step 1: Preprocess documents
     preprocessed_docs = []
     all_tokens = []
-    
-    ...
-    
+
+    token_key = "lemmatized" if use_lemmatization else "stemmed"
+    for document in documents:
+        try:
+            tokens = clean_and_tokenize(document)
+        except ValueError:
+            tokens = []
+        processed = stem_and_lemmatize(tokens)[token_key] if tokens else []
+        preprocessed_docs.append(processed)
+        all_tokens.extend(processed)
+
     # Calculate preprocessing statistics
-    ...
-    
+    total_tokens = len(all_tokens)
+    unique_tokens = len(set(all_tokens))
+    avg_doc_length = float(total_tokens / len(documents))
+
     # Step 2: Vectorization
     # Reconstruct text from processed tokens for vectorization
-    ...
-    
+    processed_texts = [" ".join(tokens) for tokens in preprocessed_docs]
+    vectorizer_class = TfidfVectorizer if vector_method == "tfidf" else CountVectorizer
+    vectorizer = vectorizer_class(ngram_range=ngram_range, token_pattern=r"(?u)\b\w+\b")
+    matrix = vectorizer.fit_transform(processed_texts)
+    feature_names = vectorizer.get_feature_names_out()
+    doc_labels = [f"doc_{i}" for i in range(len(documents))]
+    feature_df = pd.DataFrame(matrix.toarray(), columns=feature_names, index=doc_labels)
+
     # Step 3: Word embeddings
     # Filter out empty documents for Word2Vec
-    ...
-    
+    sentences = [tokens for tokens in preprocessed_docs if tokens]
+    if sentences:
+        word2vec_model = train_word2vec(sentences, workers=1)
+        vocabulary_size = len(word2vec_model.wv)
+        vector_size = int(word2vec_model.wv.vector_size)
+    else:
+        word2vec_model = None
+        vocabulary_size = 0
+        vector_size = 0
+
     # Step 4: N-gram analysis
     # Combine all documents for n-gram analysis
-    ...
-    
+    combined_text = " ".join(processed_texts).strip()
+    bigrams = generate_ngrams(combined_text, 2) if combined_text else []
+    trigrams = generate_ngrams(combined_text, 3) if combined_text else []
+    bigram_counts = count_ngrams(bigrams) if bigrams else {}
+    trigram_counts = count_ngrams(trigrams) if trigrams else {}
+
     # Sort by frequency
-    ...
-    
+    top_bigrams = sorted(bigram_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+    top_trigrams = sorted(trigram_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+
     # Calculate bigram diversity
-    ...
-    
+    bigram_diversity = len(bigram_counts) / len(bigrams) if bigrams else 0.0
+
     # Step 5: Document similarity
-    ...
+    similarity = cosine_similarity(feature_df.values)
+    similarity_df = pd.DataFrame(similarity, index=doc_labels, columns=doc_labels)
     
     # Compile results
     results = {
@@ -102,7 +149,7 @@ def analyze_documents(
         "ngram_analysis": {
             "top_bigrams": top_bigrams,
             "top_trigrams": top_trigrams,
-            "bigram_diversity": round(bigram_diversity, 3)
+            "bigram_diversity": float(round(bigram_diversity, 3))
         },
         "document_similarity": similarity_df
     }
@@ -136,16 +183,22 @@ def find_similar_documents(
         >>> find_similar_documents(0, sim_matrix, top_n=1)
         [(1, 0.8)]
     """
-   ...
-    
+    if not isinstance(similarity_matrix, pd.DataFrame):
+        raise TypeError("similarity_matrix must be a pandas DataFrame")
+    n_docs = len(similarity_matrix)
+    if not isinstance(doc_index, int) or not 0 <= doc_index < n_docs:
+        raise ValueError(f"doc_index must be between 0 and {n_docs - 1}")
+    if not isinstance(top_n, int) or top_n < 1:
+        raise ValueError("top_n must be a positive integer")
+
     # Get similarity scores for the document (excluding itself)
-    ...
-    
+    similarities = similarity_matrix.iloc[doc_index]
+
     # Remove self-similarity
-    ...
-    
+    similarities = similarities.drop(labels=similarity_matrix.index[doc_index])
+
     # Sort by similarity score (descending)
-    ...
+    sorted_similarities = sorted(similarities.items(), key=lambda item: item[1], reverse=True)
     
     # Extract document indices and scores
     result = []
@@ -182,13 +235,20 @@ def get_document_keywords(
         >>> get_document_keywords(0, features, top_n=2)
         [('nlp', 0.9), ('fun', 0.5)]
     """
-    ...
-    
+    if not isinstance(feature_matrix, pd.DataFrame):
+        raise TypeError("feature_matrix must be a pandas DataFrame")
+    n_docs = len(feature_matrix)
+    if not isinstance(doc_index, int) or not 0 <= doc_index < n_docs:
+        raise ValueError(f"doc_index must be between 0 and {n_docs - 1}")
+    if not isinstance(top_n, int) or top_n < 1:
+        raise ValueError("top_n must be a positive integer")
+
     # Get feature scores for the document
-    ...
-    
+    scores = feature_matrix.iloc[doc_index].astype(float)
+    scores = scores[scores > 0]
+
     # Sort by score (descending) and get top N
-    ...
+    top_features = scores.sort_values(ascending=False).head(top_n)
     
     # Convert to list of tuples
     result = [(feature, round(score, 4)) for feature, score in top_features.items()]
@@ -218,10 +278,11 @@ def compare_vectorization_methods(
         >>> 'bow' in comparison and 'tfidf' in comparison
         True
     """
-    ...
-    
+    _validate_documents(documents)
+
     # Run analysis with both methods
-    ...
+    bow_results = analyze_documents(documents, vector_method="bow")
+    tfidf_results = analyze_documents(documents, vector_method="tfidf")
     
     return {
         "bow": bow_results['vectorization']['feature_matrix'],
